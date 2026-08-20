@@ -156,3 +156,45 @@ docker rmi api
 ```
 
 
+### Step 1: Existing container stop koro
+
+```
+docker stop nodejscicd
+```
+
+### Step 2: Existing container remove koro
+
+```
+docker rm nodejscicd
+```
+
+### Step 3: Correct port mapping diye abar run koro
+
+```
+docker run -d --name nodejscicd -p 8080:8080 taskflow-pro
+```
+
+### Step 4: Check koro
+docker ps
+
+
+# Start
+```powershell
+docker start nodejscicd
+```
+
+# Stop
+```powershell
+docker stop nodejscicd
+```
+
+# Restart
+```powershell
+docker restart nodejscicd
+```
+
+# Status
+```powershell
+docker ps
+```
+
