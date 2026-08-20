@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 app.get("/", (req, res) => {
-  res.send("Taskflow API is running");
+    return res.json({ message: "Hello Server" });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
