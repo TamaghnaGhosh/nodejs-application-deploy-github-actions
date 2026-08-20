@@ -14,9 +14,17 @@ jobs:
         env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          printf '%s\n' "$EC2_SSH_KEY" > /tmp/ec2-key.pem
+          if [ -z "$EC2_SSH_KEY" ]; then
+            echo "::error::EC2_SSH_KEY secret is empty"
+            exit 1
+          fi
+
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > /tmp/ec2-key.pem
           chmod 600 /tmp/ec2-key.pem
 
+          ssh-keygen -y -f /tmp/ec2-key.pem > /dev/null
+
+          echo "SSH key setup successful"
       - name: Pull, build, and restart the container
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
