@@ -182,6 +182,107 @@ Create this file:
 .github/workflows/docker-deploy.yml
 ```
 
+Add this workflow:
+
+```yaml
+name: Build and deploy Docker app
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_SSH_KEY" ]; then
+            echo "::error::EC2_SSH_KEY secret is empty"
+            exit 1
+          fi
+
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > /tmp/ec2-key.pem
+          chmod 600 /tmp/ec2-key.pem
+
+          ssh-keygen -y -f /tmp/ec2-key.pem > /dev/null
+
+          echo "SSH key setup successful"
+
+      - name: Pull, build, and restart the container
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          if [ -z "$EC2_HOST" ]; then
+            echo "::error::EC2_HOST is missing"
+            exit 1
+          fi
+
+          if [ -z "$EC2_USER" ]; then
+            echo "::error::EC2_USER is missing"
+            exit 1
+          fi
+
+          ssh -i /tmp/ec2-key.pem \
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=no \
+            "$EC2_USER@$EC2_HOST" <<'REMOTE_SCRIPT'
+
+            set -e
+
+            cd ~/nodejs-application-deploy-github-actions
+
+            echo "Pulling latest code..."
+            git pull origin main
+
+            echo "Building Docker image..."
+            docker build -t taskflow-pro .
+
+            echo "Removing old container..."
+            docker rm -f nodejscicd 2>/dev/null || true
+
+            echo "Starting new container..."
+            docker run -d \
+              --name nodejscicd \
+              -p 8080:8080 \
+              taskflow-pro
+
+            echo "Waiting for application to respond..."
+            healthy=false
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error http://127.0.0.1:8080/; then
+                echo
+                echo "Application is healthy"
+                healthy=true
+                break
+              fi
+
+              echo "Attempt $attempt failed; retrying in 2 seconds..."
+              sleep 2
+            done
+
+            if [ "$healthy" != "true" ]; then
+              echo "::error::Application did not respond after 60 seconds"
+              docker logs nodejscicd
+              exit 1
+            fi
+
+            echo "Deployment finished successfully"
+
+          REMOTE_SCRIPT
+
+      - name: Cleanup SSH key
+        if: always()
+        run: |
+          rm -f /tmp/ec2-key.pem
+```
+
 The workflow runs on every push to `main`. It:
 
 - validates the SSH key secret
@@ -192,6 +293,62 @@ The workflow runs on every push to `main`. It:
 - starts a new container on port `8080`
 - waits until the app responds
 - prints Docker logs if the app fails
+
+### 6. Understand The Workflow
+
+`name` is the display name shown in the GitHub Actions tab.
+
+`on.push.branches.main` means the pipeline starts automatically whenever code is pushed to the `main` branch.
+
+`runs-on: ubuntu-latest` tells GitHub to run the pipeline on a temporary Ubuntu runner.
+
+The `Setup SSH key` step reads the private key from the `EC2_SSH_KEY` repository secret, writes it to `/tmp/ec2-key.pem`, fixes file permissions with `chmod 600`, and validates the key using `ssh-keygen`.
+
+The `Pull, build, and restart the container` step connects to the EC2 server using:
+
+```bash
+ssh -i /tmp/ec2-key.pem "$EC2_USER@$EC2_HOST"
+```
+
+Inside the EC2 server, the workflow moves into the project directory:
+
+```bash
+cd ~/nodejs-application-deploy-github-actions
+```
+
+Then it pulls the latest code:
+
+```bash
+git pull origin main
+```
+
+After that it builds the Docker image:
+
+```bash
+docker build -t taskflow-pro .
+```
+
+Then it removes the old running container if it exists:
+
+```bash
+docker rm -f nodejscicd 2>/dev/null || true
+```
+
+Then it starts a fresh container:
+
+```bash
+docker run -d --name nodejscicd -p 8080:8080 taskflow-pro
+```
+
+The health check waits for the app to respond at:
+
+```text
+http://127.0.0.1:8080/
+```
+
+If the app responds, deployment passes. If the app does not respond within 60 seconds, the workflow prints container logs and fails.
+
+The `Cleanup SSH key` step always runs at the end and removes the temporary private key from the GitHub Actions runner.
 
 ## Current Deployment Flow
 
