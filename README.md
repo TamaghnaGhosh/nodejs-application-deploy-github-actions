@@ -1,5 +1,15 @@
 # Node API Docker Commands
 
+## GitHub Actions deployment
+
+Every push to `main` (or a manual workflow run) deploys the Docker image to the EC2 host over SSH. Add these repository secrets before running the workflow:
+
+- `EC2_HOST`: EC2 public DNS name or IP address
+- `EC2_USER`: `ubuntu`
+- `EC2_SSH_KEY`: the complete contents of `nodejsappcicd.pem`
+
+The EC2 host must have Docker and Git installed, and the repository must be checked out at `~/nodejs-application-deploy-github-actions`. The workflow rebuilds `taskflow-pro`, replaces the `nodejscicd` container, and checks `http://127.0.0.1:8080/`.
+
 ## Build the image
 
 ```powershell
