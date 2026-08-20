@@ -69,6 +69,7 @@ jobs:
             docker ps --filter name=nodejscicd --filter status=running
 
             echo "Waiting for application to respond..."
+            healthy=false
             for attempt in $(seq 1 30); do
               if ! docker ps --filter name=nodejscicd --filter status=running --format '{{.Names}}' | grep -q '^nodejscicd$'; then
                 echo "::error::Container stopped before the app became healthy"
@@ -79,16 +80,21 @@ jobs:
               if curl --fail --silent --show-error http://127.0.0.1:8080/; then
                 echo
                 echo "Application is healthy"
-                exit 0
+                healthy=true
+                break
               fi
 
               echo "Attempt $attempt failed; retrying in 2 seconds..."
               sleep 2
             done
 
-            echo "::error::Application did not respond after 60 seconds"
-            docker logs nodejscicd
-            exit 1
+            if [ "$healthy" != "true" ]; then
+              echo "::error::Application did not respond after 60 seconds"
+              docker logs nodejscicd
+              exit 1
+            fi
+
+            echo "Deployment finished successfully"
 
           REMOTE_SCRIPT
 
