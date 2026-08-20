@@ -1,210 +1,255 @@
-# Node API Docker Commands
+# Node API Docker CI/CD Pipeline
 
-## GitHub Actions deployment
+This project is a simple Express API deployed with Docker and GitHub Actions. Every push to the `main` branch connects to an EC2 instance over SSH, pulls the latest code, rebuilds the Docker image, restarts the container, and checks that the app is responding.
 
-Every push to `main` (or a manual workflow run) deploys the Docker image to the EC2 host over SSH. Add these repository secrets before running the workflow:
+## Project Files
 
-- `EC2_HOST`: EC2 public DNS name or IP address
-- `EC2_USER`: `ubuntu`
-- `EC2_SSH_KEY`: the complete contents of `nodejsappcicd.pem`
+- `index.js`: Express API entrypoint
+- `Dockerfile`: Docker image instructions
+- `docker-compose.yml`: Local Docker Compose runner
+- `.dockerignore`: Files excluded from the Docker build context
+- `.github/workflows/docker-deploy.yml`: GitHub Actions deployment pipeline
 
-The EC2 host must have Docker and Git installed, and the repository must be checked out at `~/nodejs-application-deploy-github-actions`. The workflow rebuilds `taskflow-pro`, replaces the `nodejscicd` container, and checks `http://127.0.0.1:8080/`.
+## Local Development
 
-## Build the image
+Install dependencies:
 
 ```powershell
-docker build -t api .
+npm install
 ```
 
-## Run with Docker Compose
+Run the API locally:
 
-Start the application in the background using `docker-compose.yml`:
+```powershell
+npm start
+```
+
+Open:
+
+```text
+http://localhost:8080/
+```
+
+Expected response:
+
+```text
+Taskflow API is running
+```
+
+## Run With Docker
+
+Build the image:
+
+```powershell
+docker build -t taskflow-pro .
+```
+
+Run the container:
+
+```powershell
+docker run -d --name nodejscicd -p 8080:8080 taskflow-pro
+```
+
+Check the container:
+
+```powershell
+docker ps
+docker logs nodejscicd
+```
+
+Stop and remove the container:
+
+```powershell
+docker rm -f nodejscicd
+```
+
+## Run With Docker Compose
+
+Start:
 
 ```powershell
 docker compose up -d
 ```
 
-Command explanation:
-
-- `docker compose` uses the Compose configuration in `docker-compose.yml`.
-- `up` creates and starts the application container.
-- `-d` runs the container in detached mode, so the terminal remains available.
-- The Compose service builds the image from the `Dockerfile` when needed.
-- Port `8080` is available at `http://localhost:8080`.
-
-Check the Compose service and view its logs:
+Check:
 
 ```powershell
 docker compose ps
-docker compose logs
 docker compose logs -f
 ```
 
-Verify the API is responding:
-
-```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:8080/
-```
-
-Stop and remove the Compose application:
+Stop:
 
 ```powershell
 docker compose down
 ```
 
-`docker compose down` stops and removes the application container and Compose network. It does not remove the Docker image. Start it again later with `docker compose up -d`.
+## How To Create The Pipeline
 
-## Run the API
+### 1. Create The Dockerfile
 
-Run the container in the background and publish it on `http://localhost:8080`:
+The Dockerfile uses Node 22 Alpine, installs dependencies, copies the app files, exposes port `8080`, and starts `index.js`.
 
-```powershell
-docker run -d --name api -p 8080:8080 api
+```dockerfile
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+COPY . .
+
+EXPOSE 8080
+
+CMD ["node", "index.js"]
 ```
 
-Verify the API is responding:
+### 2. Add `.dockerignore`
 
-```powershell
-Invoke-WebRequest -UseBasicParsing http://localhost:8080/
+This keeps the Docker image clean and prevents local files from being copied into the container.
+
+```text
+node_modules
+npm-debug.log
+.git
+.github
+.env
+.env.*
 ```
 
-## View status and logs
+### 3. Prepare The EC2 Server
 
-```powershell
-docker ps
-docker logs api
-docker logs -f api
+SSH into the EC2 instance:
+
+```bash
+ssh -i nodejsappcicd.pem ubuntu@<EC2_PUBLIC_IP>
 ```
 
-## Stop and remove the container
+Install Docker and Git if they are not already installed:
 
-```powershell
-docker stop api
-docker rm api
+```bash
+sudo apt update
+sudo apt install -y docker.io git
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo usermod -aG docker ubuntu
 ```
 
-To stop and remove it in one command:
+Log out and log in again after adding the user to the Docker group.
 
-```powershell
-docker rm -f api
+Clone the repository on the EC2 instance:
+
+```bash
+git clone https://github.com/TamaghnaGhosh/nodejs-application-deploy-github-actions.git
+cd ~/nodejs-application-deploy-github-actions
 ```
 
-## Run interactively
+The workflow expects the project path to be:
 
-Use this command when you want to see the server output in the current terminal:
-
-```powershell
-docker run -it --rm -p 8080:8080 api
+```text
+~/nodejs-application-deploy-github-actions
 ```
 
-Command explanation:
+### 4. Add GitHub Repository Secrets
 
-- `docker run` creates and starts a container from the `api` image.
-- `-it` keeps the terminal interactive so you can see the server output.
-- `--rm` removes the container automatically after it stops.
-- `-p 8080:8080` maps host port `8080` to the container port `8080`.
-- `api` is the Docker image name.
+In GitHub, go to:
 
-Press `Ctrl+C` in the running terminal to stop the container and release port `8080`.
-
-To stop the interactive container from another PowerShell terminal, find its container ID:
-
-```powershell
-docker ps --filter publish=8080
+```text
+Repository > Settings > Secrets and variables > Actions > New repository secret
 ```
 
-Then stop it using the displayed container ID:
+Add these secrets:
 
-```powershell
-docker stop <CONTAINER_ID>
+- `EC2_HOST`: EC2 public IP address or public DNS
+- `EC2_USER`: EC2 SSH user, usually `ubuntu`
+- `EC2_SSH_KEY`: full private key content from the `.pem` file
+
+For `EC2_SSH_KEY`, paste the complete key including:
+
+```text
+-----BEGIN ... PRIVATE KEY-----
+...
+-----END ... PRIVATE KEY-----
 ```
 
-## Troubleshoot port 8080
+### 5. Create The GitHub Actions Workflow
 
-List containers currently using port `8080`:
+Create this file:
 
-```powershell
-docker ps --filter publish=8080
+```text
+.github/workflows/docker-deploy.yml
 ```
 
-Stop every Docker container currently publishing port `8080`:
+The workflow runs on every push to `main`. It:
 
-```powershell
-docker stop $(docker ps --filter publish=8080 -q)
-```
+- validates the SSH key secret
+- connects to EC2
+- runs `git pull origin main`
+- builds the Docker image as `taskflow-pro`
+- removes the old `nodejscicd` container
+- starts a new container on port `8080`
+- waits until the app responds
+- prints Docker logs if the app fails
 
-Stop the named API container if it is already running:
+## Current Deployment Flow
 
-```powershell
-docker stop api
-```
+When code is pushed to `main`, GitHub Actions runs:
 
-If Docker shows no container but port `8080` is still busy, identify the Windows process using it:
-
-```powershell
-Get-NetTCPConnection -LocalPort 8080 -State Listen | Select-Object OwningProcess
-```
-
-Stop that process only after confirming its process ID:
-
-```powershell
-Stop-Process -Id <PROCESS_ID> -Force
-```
-
-Run the API on another host port if `8080` is needed by another application:
-
-```powershell
-docker run -d --name api -p 8081:8080 api
-```
-
-The API is then available at `http://localhost:8081`.
-
-## Remove the image
-
-```powershell
-docker rmi api
-```
-
-
-### Step 1: Existing container stop koro
-
-```
-docker stop nodejscicd
-```
-
-### Step 2: Existing container remove koro
-
-```
-docker rm nodejscicd
-```
-
-### Step 3: Correct port mapping diye abar run koro
-
-```
+```bash
+git pull origin main
+docker build -t taskflow-pro .
+docker rm -f nodejscicd 2>/dev/null || true
 docker run -d --name nodejscicd -p 8080:8080 taskflow-pro
+curl http://127.0.0.1:8080/
 ```
 
-### Step 4: Check koro
-docker ps
+The deployed app is available on:
 
-
-# Start
-```powershell
-docker start nodejscicd
+```text
+http://<EC2_PUBLIC_IP>:8080/
 ```
 
-# Stop
-```powershell
-docker stop nodejscicd
+Make sure the EC2 security group allows inbound TCP traffic on port `8080`.
+
+## Manual EC2 Restart Commands
+
+Use these on the EC2 instance if you need to restart manually:
+
+```bash
+cd ~/nodejs-application-deploy-github-actions
+git pull origin main
+docker build -t taskflow-pro .
+docker rm -f nodejscicd 2>/dev/null || true
+docker run -d --name nodejscicd -p 8080:8080 taskflow-pro
+docker logs nodejscicd
 ```
 
-# Restart
-```powershell
+## Troubleshooting
+
+Check container status:
+
+```bash
+docker ps -a
+```
+
+View logs:
+
+```bash
+docker logs nodejscicd
+```
+
+Check if port `8080` is already in use:
+
+```bash
+sudo lsof -i :8080
+```
+
+Restart the container:
+
+```bash
 docker restart nodejscicd
 ```
 
-# Status
-```powershell
-docker ps
-```
-
+If GitHub Actions fails during the health check, check the workflow logs. The pipeline prints `docker logs nodejscicd` when the container stops or does not respond within 60 seconds.
